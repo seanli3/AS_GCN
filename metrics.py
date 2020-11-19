@@ -1,4 +1,5 @@
 import tensorflow as tf
+from sklearn.metrics import f1_score
 
 
 
@@ -27,7 +28,7 @@ def softmax_cross_entropy(preds, labels):
 
 def accuracy(preds, labels):
     correct_prediction = tf.equal(tf.argmax(preds, 1), tf.argmax(labels, 1))
+    # print(f1_score(tf.argmax(labels, 1), tf.argmax(preds, 1), average="macro"))
     accuracy_all = tf.cast(correct_prediction, tf.float32)
     return tf.reduce_mean(accuracy_all)
-
 

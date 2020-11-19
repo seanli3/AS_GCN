@@ -26,6 +26,7 @@ class Model(object):
 
         self.inputs = None
         self.outputs = None
+        self.logits = None
 
         self.loss = 0
         self.reg_loss = 0
@@ -57,6 +58,8 @@ class Model(object):
 
         self.reg_loss += reg_loss
         self.outputs = self.activations[-1]
+
+        self.logits = tf.nn.softmax(self.outputs)
 
         # Store model variables for easy access
         variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.name)
@@ -137,6 +140,7 @@ class MLP(Model):
                                  logging=self.logging))
 
     def predict(self):
+        self.logits = tf.nn.softmax(self.outputs)
         return tf.nn.softmax(self.outputs)
 
 
@@ -160,10 +164,12 @@ class GCN(Model):
             self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
 
         # Cross entropy error
+        self.logits = tf.nn.softmax(self.outputs)
         self.loss += masked_softmax_cross_entropy(self.outputs, self.placeholders['labels'],
                                                   self.placeholders['labels_mask'])
 
     def _accuracy(self):
+        self.logits = tf.nn.softmax(self.outputs)
         self.accuracy = masked_accuracy(self.outputs, self.placeholders['labels'],
                                         self.placeholders['labels_mask'])
 

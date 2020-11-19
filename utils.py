@@ -1,3 +1,8 @@
+import os.path as osp
+from torch_geometric.utils import is_undirected, to_undirected
+import torch_geometric.transforms as T
+import torch
+import torch.nn.functional as F
 import numpy as np
 import pickle as pkl
 import networkx as nx
@@ -9,6 +14,8 @@ from scipy.linalg import qr
 from sparse_tensor_utils import *
 import json
 from networkx.readwrite import json_graph
+from torch_geometric.datasets import Planetoid
+from webkb_data import WebKB
 
 
 def parse_index_file(filename):
@@ -451,36 +458,48 @@ def construct_feeddict_forMixlayers(AXfeatures, support, labels, placeholders):
     return feed_dict
 
 
-def prepare_pubmed(dataset, max_degree):
+def prepare_pubmed(name, max_degree, split):
+    path = osp.join(osp.dirname(osp.realpath(__file__)), '..', 'data', name)
+    if name.lower() in ['cornell', 'texas', 'wisconsin', 'film', 'chameleon']:
+        dataset = WebKB(path, name)
+    else:
+        dataset = Planetoid(path, name, split="full", transform= T.NormalizeFeatures())
 
-    adj, features, y_train, y_val, y_test, train_mask, val_mask, test_mask = load_data(dataset)
+    dataset.data.y = dataset.data.y.long()
+    if not is_undirected(dataset.data.edge_index):
+        dataset.data.edge_index = to_undirected(dataset.data.edge_index)
 
-    train_index = np.where(train_mask)[0]
-    adj_train = adj[train_index, :][:, train_index]
-    y_train = y_train[train_index]
-    val_index = np.where(val_mask)[0]
-    y_val = y_val[val_index]
-    test_index = np.where(test_mask)[0]
-    y_test = y_test[test_index]
+    data = dataset[0]
+    adj = torch.sparse_coo_tensor(data.edge_index, torch.ones(data.num_edges), (data.num_nodes, data.num_nodes))
+    features = data.x
+    y_train = F.one_hot(data.y[data.train_mask[split]])
+    y_val = F.one_hot(data.y[data.val_mask[split]])
+    y_test = F.one_hot(data.y[data.test_mask[split]])
+    train_mask = data.train_mask[split]
+    val_mask = data.val_mask[split]
+    test_mask = data.test_mask[split]
+
+    train_index = torch.tensor(np.where(train_mask)[0])
+    adj_train = adj.index_select(0, train_index).index_select(1, train_index)
 
     num_train = adj_train.shape[0]
     input_dim = features.shape[1]
 
-    features = nontuple_preprocess_features(features).todense()
+    features = nontuple_preprocess_features(features)
     train_features = features[train_index]
 
-    norm_adj_train = nontuple_preprocess_adj(adj_train)
-    norm_adj = nontuple_preprocess_adj(adj)
+    norm_adj_train = nontuple_preprocess_adj(adj_train.to_dense().numpy())
+    norm_adj = nontuple_preprocess_adj(adj.to_dense().numpy())
 
-    if dataset == 'pubmed':
-        norm_adj = 1*sp.diags(np.ones(norm_adj.shape[0])) + norm_adj
-        norm_adj_train = 1*sp.diags(np.ones(num_train)) + norm_adj_train
+    # if dataset == 'pubmed':
+    #     norm_adj = 1*sp.diags(np.ones(norm_adj.shape[0])) + norm_adj
+    #     norm_adj_train = 1*sp.diags(np.ones(num_train)) + norm_adj_train
 
     # adj_train, adj_val_train = norm_adj_train, norm_adj_train
     adj_train, adj_val_train = compute_adjlist(norm_adj_train, max_degree)
     train_features = np.concatenate((train_features, np.zeros((1, input_dim))))
 
-    return norm_adj, adj_train, adj_val_train, features, train_features, y_train, y_test, test_index
+    return norm_adj, adj_train, adj_val_train, features, train_features, y_train, y_test, test_mask.nonzero().view(-1), y_val, val_mask.nonzero().view(-1)
 
 
 def prepare_reddit(max_degree):
